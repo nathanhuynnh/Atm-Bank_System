@@ -1,6 +1,5 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 
-from __future__ import print_function
 import pexpect
 import sys
 import os
@@ -75,7 +74,7 @@ def check_exit(expected, actual):
 
 def test_init(init_path):
     def expect_usage(c):
-        c.expect('Usage:\s+init <filename>')
+        c.expect(r'Usage:\s+init <filename>')
         c.wait()
         c.close()
         check_exit(62, c.exitstatus)
@@ -95,7 +94,7 @@ def test_init(init_path):
     check_exit(0, child.exitstatus)
     
     child = spawn('{path1}/bin/init {path2}'.format(path1=init_path,path2=file_path))
-    child.expect('Error:\s+one of the files already exists')
+    child.expect(r'Error:\s+one of the files already exists')
     child.wait()
     child.close()
     check_exit(63, child.exitstatus)
@@ -104,11 +103,11 @@ def test_init(init_path):
 
 def test_create_user(init_path):
     def expect_create_user_usage(c):
-        c.expect('Usage:\s+create-user <user-name> <pin> <balance>')
-        c.expect('BANK:\s*')
+        c.expect(r'Usage:\s+create-user <user-name> <pin> <balance>')
+        c.expect(r'BANK:\s*')
     def expect_deposit_usage(c):
-        c.expect('Usage:\s+deposit <user-name> <amt>')
-        c.expect('BANK:\s*')
+        c.expect(r'Usage:\s+deposit <user-name> <amt>')
+        c.expect(r'BANK:\s*')
 
     init = spawn('{path1}/bin/init {path2}'.format(path1=init_path,path2=file_path))
     init.expect('Successfully initialized bank state')
@@ -118,7 +117,7 @@ def test_create_user(init_path):
     bank = spawn('{path1}/bin/bank {path2}.bank'.format(path1=init_path,path2=file_path))
 
     # some test cases for wrong create-user usage
-    bank.expect('BANK:\s*')
+    bank.expect(r'BANK:\s*')
     bank.sendline('create-user')
     expect_create_user_usage(bank)
     bank.sendline('create-user foo')
@@ -129,21 +128,21 @@ def test_create_user(init_path):
     # one test case for correct create-user
     bank.sendline('create-user alice 1234 100')
     bank.expect('Created user alice')
-    bank.expect('BANK:\s*')
+    bank.expect(r'BANK:\s*')
 
     # some cases for balance
     bank.sendline('balance bob')
     bank.expect('No such user')
-    bank.expect('BANK:\s*')
+    bank.expect(r'BANK:\s*')
     
     bank.sendline('balance alice')
-    bank.expect('\$100')
-    bank.expect('BANK:\s*')
+    bank.expect(r'\$100')
+    bank.expect(r'BANK:\s*')
 
     # some cases for deposit
     bank.sendline('deposit alice 50')
-    bank.expect('\$50 added to alice\'s account')
-    bank.expect('BANK:\s*')
+    bank.expect(r'\$50 added to alice\'s account')
+    bank.expect(r'BANK:\s*')
 
     bank.sendline('deposit alice -50')
     expect_deposit_usage(bank)
