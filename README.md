@@ -14,6 +14,34 @@ teams' designs! We have tried to make these instructions as explicit
 as possible. Read them carefully; *if anything is unclear, please ask
 for clarification well in advance.*
 
+## Purpose
+
+In this project, you will learn to:
+
+ * Analyze an existing code base that you need to develop further; you
+   will find yourself doing this sort of thing frequently throughout
+   your career.
+ * Design a complex system, including protocols, and write a thorough
+   specification; again, this is a common aspect of any programming
+   career, especially as you gain more responsibility.
+ * Implement a specification; this requires understanding the
+   specification, looking for unspecified edge cases, and testing
+   thorougly, and is another thing you will find to be a common aspect
+   of any programming career.
+ * Analyze a specification and implementation from a security
+   perspective; this code will be much more complex than in the
+   previous projects, and more accurately reflects the scope of a real
+   programming project.
+ * Work as part of a team; very little work is done completely solo,
+   so it's important for you to learn how to contribute as part of a
+   team, communicate with your teammates, and (at times) deal with
+   teammates who are perhaps not carrying as much of the weight of the
+   project as the rest of the team.
+ * Work on a git repository with multiple contributors; this ideally
+   should involve branches and merges, and might involve resolving
+   merge conflicts --- developing these skills with git will be very
+   valuable on your resume.
+
 ## Overview
 
  1. You may work in teams of at most five people. Sign up for your
