@@ -19,6 +19,15 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <stdio.h>
+#include "protocol.h"
+
+typedef struct _User 
+{
+    char username[251];
+    int balance;
+    char pin[5];
+    struct _User *next;
+} User;
 
 typedef struct _Bank
 {
@@ -29,9 +38,12 @@ typedef struct _Bank
 
     // Protocol state
     // TODO add more, as needed
+    init_data_t secrets; // Stores keys from .bank file
+    User *users;
 } Bank;
 
-Bank* bank_create();
+Bank* bank_create(char *fname);
+
 void bank_free(Bank *bank);
 ssize_t bank_send(Bank *bank, char *data, size_t data_len);
 ssize_t bank_recv(Bank *bank, char *data, size_t max_data_len);
