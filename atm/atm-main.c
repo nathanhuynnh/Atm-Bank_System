@@ -8,22 +8,46 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static const char prompt[] = "ATM: ";
-
-int main()
+int main(int argc, char **argv)
 {
     char user_input[1000];
 
-    ATM *atm = atm_create();
+    if (argc != 2) {
+        printf("Usage:  atm <init-file>\n");
+        return 64;
+    }
 
-    printf("%s", prompt);
-    fflush(stdout);
+    ATM *atm = atm_create(argv[1]);
 
-    while (fgets(user_input, 10000,stdin) != NULL)
+    atm_print_prompt(atm);
+
+    while (fgets(user_input, sizeof(user_input), stdin) != NULL)
     {
         atm_process_command(atm, user_input);
-        printf("%s", prompt);
-        fflush(stdout);
+        atm_print_prompt(atm);
     }
-	return EXIT_SUCCESS;
+
+    atm_free(atm);
+    return EXIT_SUCCESS;
 }
+
+
+// static const char prompt[] = "ATM: ";
+
+// int main()
+// {
+//     char user_input[1000];
+
+//     ATM *atm = atm_create();
+
+//     printf("%s", prompt);
+//     fflush(stdout);
+
+//     while (fgets(user_input, 10000,stdin) != NULL)
+//     {
+//         atm_process_command(atm, user_input);
+//         printf("%s", prompt);
+//         fflush(stdout);
+//     }
+// 	return EXIT_SUCCESS;
+// }
