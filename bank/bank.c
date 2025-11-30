@@ -1,5 +1,7 @@
 #include "bank.h"
 #include "ports.h"
+#include "../protocol.h"
+#include "../util/crypto.h"
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -8,7 +10,6 @@
 #include <ctype.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
-
 
 //Helper functions
 int is_valid_user(const char *name) {
@@ -95,7 +96,7 @@ Bank* bank_create(char *init_fname)
     bind(bank->sockfd,(struct sockaddr *)&bank->bank_addr,sizeof(bank->bank_addr));
 
     // Set up the protocol state
-    // TODO set up more, as needed
+    bank->last_sequence = 0;
 
     return bank;
 }
@@ -126,6 +127,52 @@ ssize_t bank_recv(Bank *bank, char *data, size_t max_data_len)
 {
     // Returns the number of bytes received; negative on error
     return recvfrom(bank->sockfd, data, max_data_len, 0, NULL, NULL);
+}
+
+// Secure send by encrypting and authenticating
+static ssize_t bank_send_secure(Bank *bank, const char *plaintext, size_t plaintext_len, uint64_t sequence)
+{
+    uint8_t ciphertext[MAX_CIPHERTEXT_SIZE];
+    
+    int cipher_len = crypto_encrypt_and_auth(
+        (const uint8_t*)plaintext, plaintext_len,
+        ciphertext, sizeof(ciphertext),
+        sequence,
+        bank->secrets.encryption_key,
+        bank->secrets.hmac_key
+    );
+    
+    if (cipher_len < 0) {
+        return -1;
+    }
+    
+    return bank_send(bank, (char*)ciphertext, cipher_len);
+}
+
+// Secure receive by decrypting and verifying
+static ssize_t bank_recv_secure(Bank *bank, char *plaintext, size_t max_plaintext_len, uint64_t *received_seq)
+{
+    uint8_t ciphertext[MAX_CIPHERTEXT_SIZE];
+    
+    ssize_t cipher_len = bank_recv(bank, (char*)ciphertext, sizeof(ciphertext));
+    if (cipher_len < 0) {
+        return -1;
+    }
+    
+    int plain_len = crypto_decrypt_and_verify(
+        ciphertext, cipher_len,
+        (uint8_t*)plaintext, max_plaintext_len,
+        received_seq,
+        bank->secrets.encryption_key,
+        bank->secrets.hmac_key
+    );
+    
+    if (plain_len < 0) {
+        return -1;  // Decryption or authentication failed
+    }
+    
+    plaintext[plain_len] = '\0';
+    return plain_len;
 }
 
 void bank_process_local_command(Bank *bank, char *command, size_t len)
@@ -276,19 +323,76 @@ void bank_process_local_command(Bank *bank, char *command, size_t len)
 void bank_process_remote_command(Bank *bank, char *command, size_t len)
 {
     // TODO: Implement the bank side of the ATM-bank protocol
-
-	/*
-	 * The following is a toy example that simply receives a
-	 * string from the ATM, prepends "Bank got: " and echoes 
-	 * it back to the ATM before printing it to stdout.
-	 */
-
-	/*
-    char sendline[1000];
-    command[len]=0;
-    sprintf(sendline, "Bank got: %s", command);
-    bank_send(bank, sendline, strlen(sendline));
-    printf("Received the following:\n");
-    fputs(command, stdout);
-	*/
+    char plaintext[1000];
+    uint64_t received_seq;
+    
+    // Decrypt and verify the incoming message
+    int plain_len = crypto_decrypt_and_verify(
+        (const uint8_t*)command, len,
+        (uint8_t*)plaintext, sizeof(plaintext) - 1,
+        &received_seq,
+        bank->secrets.encryption_key,
+        bank->secrets.hmac_key
+    );
+    
+    if (plain_len < 0) {
+        return;  // Invalid message, ignore
+    }
+    
+    plaintext[plain_len] = '\0';
+    
+    // Check for replay attack, if detected ignore it
+    if (received_seq <= bank->last_sequence) {
+        return;
+    }
+    bank->last_sequence = received_seq;
+    
+    char cmd[100];
+    char arg1[256];
+    char arg2[256];
+    
+    int num_args = sscanf(plaintext, "%s %s %s", cmd, arg1, arg2);
+    
+    if (num_args < 1) {
+        return;
+    }
+    
+    // AUTH <username> <pin>
+    if (strcmp(cmd, "AUTH") == 0 && num_args == 3) {
+        User *u = find_user(bank, arg1);
+        if (u != NULL && strcmp(u->pin, arg2) == 0) {
+            bank_send_secure(bank, "AUTH_OK", 7, received_seq + 1);
+        } else {
+            bank_send_secure(bank, "AUTH_FAIL", 9, received_seq + 1);
+        }
+    }
+    // WITHDRAW <username> <amount>
+    else if (strcmp(cmd, "WITHDRAW") == 0 && num_args == 3) {
+        User *u = find_user(bank, arg1);
+        if (u == NULL) {
+            bank_send_secure(bank, "WITHDRAW_FAIL", 13, received_seq + 1);
+            return;
+        }
+        
+        int amount = atoi(arg2);
+        if (amount <= 0 || amount > u->balance) {
+            bank_send_secure(bank, "WITHDRAW_FAIL", 13, received_seq + 1);
+            return;
+        }
+        
+        u->balance -= amount;
+        bank_send_secure(bank, "WITHDRAW_OK", 11, received_seq + 1);
+    }
+    // BALANCE <username>
+    else if (strcmp(cmd, "BALANCE") == 0 && num_args == 2) {
+        User *u = find_user(bank, arg1);
+        if (u == NULL) {
+            bank_send_secure(bank, "BALANCE_FAIL", 12, received_seq + 1);
+            return;
+        }
+        
+        char response[100];
+        snprintf(response, sizeof(response), "BALANCE %d", u->balance);
+        bank_send_secure(bank, response, strlen(response), received_seq + 1);
+    }
 }
