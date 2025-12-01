@@ -1,7 +1,5 @@
 /*
  * The init program creates initialization files for the bank and ATM.
- *
- * Feel free to update as needed.
  */
 
 #ifndef __INIT_H__

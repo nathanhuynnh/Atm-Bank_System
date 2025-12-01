@@ -1,7 +1,5 @@
 /* 
  * The main program for init.
- *
- * You are free to change this as necessary.
  */
 
 #include "init.h"
