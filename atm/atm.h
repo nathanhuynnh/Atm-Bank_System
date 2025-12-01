@@ -16,8 +16,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <stdio.h>
+#include <stdint.h>
 
-#include "protocol.h"   // added
+#include "../protocol.h"
 
 typedef struct _ATM
 {
@@ -27,15 +28,14 @@ typedef struct _ATM
     struct sockaddr_in atm_addr;
 
     // Protocol state
-    // TODO add more, as needed
-    init_data_t secrets;    // keys from .atm file
-    int logged_in;  // 0 = no user, 1 = user logged in
-    char current_user[251]; 
+    init_data_t secrets;
+    char current_user[251];
+    char current_pin[5];
+    int in_session;
+    uint64_t sequence_number;
 } ATM;
 
-void atm_print_prompt(ATM *atm);    // added
-
-ATM* atm_create(char *init_fname);
+ATM* atm_create(const char *init_filename);
 void atm_free(ATM *atm);
 ssize_t atm_send(ATM *atm, char *data, size_t data_len);
 ssize_t atm_recv(ATM *atm, char *data, size_t max_data_len);

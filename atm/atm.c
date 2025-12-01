@@ -1,106 +1,39 @@
 #include "atm.h"
 #include "ports.h"
+#include "../util/crypto.h"
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-
-#include <stdio.h>
 #include <ctype.h>
+#include <limits.h>
+#include <openssl/evp.h>
 
-// Helpers
+// Helper functions
 static int is_valid_user(const char *name) {
-    if (name == NULL) return 0;
-    size_t len = strlen(name);
-    if (len == 0 || len > 250) return 0;
-    for (size_t i = 0; i < len; i++) {
+    if (name == NULL || strlen(name) == 0 || strlen(name) > 250) return 0;
+    for (int i = 0; name[i]; i++) {
         if (!isalpha((unsigned char)name[i])) return 0;
     }
     return 1;
 }
 
+static int is_valid_pin(const char *pin) {
+    if (pin == NULL || strlen(pin) != 4) return 0;
+    for (int i = 0; i < 4; i++) {
+        if (!isdigit((unsigned char)pin[i])) return 0;
+    }
+    return 1;
+}
+
 static int is_valid_amount(const char *amt) {
-    if (amt == NULL || amt[0] == '\0') return 0;
+    if (amt == NULL || strlen(amt) == 0) return 0;
     for (int i = 0; amt[i]; i++) {
         if (!isdigit((unsigned char)amt[i])) return 0;
     }
     return 1;
 }
 
-/* simple text protocol to bank; your team can later replace with encrypted messages */
-
-static int atm_check_user_exists(ATM *atm, const char *user) {
-    char sendbuf[512];
-    char recvbuf[512];
-    int n;
-
-    snprintf(sendbuf, sizeof(sendbuf), "CHECK-USER %s\n", user);
-    atm_send(atm, sendbuf, strlen(sendbuf));
-
-    n = atm_recv(atm, recvbuf, sizeof(recvbuf) - 1);
-    if (n <= 0) return 0;
-
-    recvbuf[n] = '\0';
-    if (strncmp(recvbuf, "OK", 2) == 0) return 1;
-    return 0;
-}
-
-static int atm_auth_user(ATM *atm, const char *user, const char *pin) {
-    char sendbuf[512];
-    char recvbuf[512];
-    int n;
-
-    snprintf(sendbuf, sizeof(sendbuf), "AUTH %s %s\n", user, pin);
-    atm_send(atm, sendbuf, strlen(sendbuf));
-
-    n = atm_recv(atm, recvbuf, sizeof(recvbuf) - 1);
-    if (n <= 0) return 0;
-
-    recvbuf[n] = '\0';
-    if (strncmp(recvbuf, "OK", 2) == 0) return 1;
-    return 0;
-}
-
-static int atm_withdraw_remote(ATM *atm, const char *user, const char *amt_str) {
-    char sendbuf[512];
-    char recvbuf[512];
-    int n;
-
-    snprintf(sendbuf, sizeof(sendbuf), "WITHDRAW %s %s\n", user, amt_str);
-    atm_send(atm, sendbuf, strlen(sendbuf));
-
-    n = atm_recv(atm, recvbuf, sizeof(recvbuf) - 1);
-    if (n <= 0) return -1;
-
-    recvbuf[n] = '\0';
-    if (strncmp(recvbuf, "OK", 2) == 0) return 1;
-    if (strncmp(recvbuf, "NOFUNDS", 7) == 0) return 0;
-    return -1;
-}
-
-static int atm_balance_remote(ATM *atm, const char *user, int *balance_out) {
-    char sendbuf[512];
-    char recvbuf[512];
-    int n;
-
-    snprintf(sendbuf, sizeof(sendbuf), "BALANCE %s\n", user);
-    atm_send(atm, sendbuf, strlen(sendbuf));
-
-    n = atm_recv(atm, recvbuf, sizeof(recvbuf) - 1);
-    if (n <= 0) return 0;
-
-    recvbuf[n] = '\0';
-
-    char cmd[64];
-    int bal;
-    if (sscanf(recvbuf, "%63s %d", cmd, &bal) != 2) return 0;
-    if (strcmp(cmd, "BALANCE") != 0) return 0;
-
-    *balance_out = bal;
-    return 1;
-}
-
-// Start of original code
-ATM* atm_create(char *init_fname)
+ATM* atm_create(const char *init_filename)
 {
     ATM *atm = (ATM*) malloc(sizeof(ATM));
     if(atm == NULL)
@@ -109,38 +42,51 @@ ATM* atm_create(char *init_fname)
         exit(1);
     }
 
-    // Set up the network state
-    atm->sockfd=socket(AF_INET,SOCK_DGRAM,0);
-
-    bzero(&atm->rtr_addr,sizeof(atm->rtr_addr));
-    atm->rtr_addr.sin_family = AF_INET;
-    atm->rtr_addr.sin_addr.s_addr=inet_addr("127.0.0.1");
-    atm->rtr_addr.sin_port=htons(ROUTER_PORT);
-
-    bzero(&atm->atm_addr, sizeof(atm->atm_addr));
-    atm->atm_addr.sin_family = AF_INET;
-    atm->atm_addr.sin_addr.s_addr=inet_addr("127.0.0.1");
-    atm->atm_addr.sin_port = htons(ATM_PORT);
-    bind(atm->sockfd,(struct sockaddr *)&atm->atm_addr,sizeof(atm->atm_addr));
-
-    // Set up the protocol state
-    // TODO set up more, as needed
-    atm->logged_in = 0;
-    atm->current_user[0] = '\0';
-
-    /* read <init-fname>.atm into atm->secrets */
-    FILE *fp = fopen(init_fname, "rb");
+    // Load init file (keys, etc.)
+    FILE *fp = fopen(init_filename, "rb");
     if (fp == NULL) {
         printf("Error opening ATM initialization file\n");
         exit(64);
     }
+
     size_t read_count = fread(&atm->secrets, sizeof(init_data_t), 1, fp);
+    fclose(fp);
     if (read_count != 1) {
         printf("Error opening ATM initialization file\n");
-        fclose(fp);
         exit(64);
     }
-    fclose(fp);
+
+    // Set up the network state
+    atm->sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (atm->sockfd < 0) {
+        perror("Could not create ATM socket");
+        exit(1);
+    }
+
+    memset(&atm->rtr_addr, 0, sizeof(atm->rtr_addr));
+    atm->rtr_addr.sin_family = AF_INET;
+    atm->rtr_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    atm->rtr_addr.sin_port = htons(ROUTER_PORT);
+
+    memset(&atm->atm_addr, 0, sizeof(atm->atm_addr));
+    atm->atm_addr.sin_family = AF_INET;
+    atm->atm_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    atm->atm_addr.sin_port = htons(ATM_PORT);
+
+    if (bind(atm->sockfd, (struct sockaddr *)&atm->atm_addr,
+             sizeof(atm->atm_addr)) < 0) {
+        perror("Could not bind ATM socket");
+        exit(1);
+    }
+
+    // Set up the protocol state
+    atm->in_session = 0;
+    atm->current_user[0] = '\0';
+    atm->current_pin[0] = '\0';
+
+    // Start sequence at 1 so bank (which initializes last_sequence to 0)
+    // will accept the first message.
+    atm->sequence_number = 1;
 
     return atm;
 }
@@ -149,7 +95,9 @@ void atm_free(ATM *atm)
 {
     if(atm != NULL)
     {
-        close(atm->sockfd);
+        if (atm->sockfd >= 0) {
+            close(atm->sockfd);
+        }
         free(atm);
     }
 }
@@ -167,159 +115,280 @@ ssize_t atm_recv(ATM *atm, char *data, size_t max_data_len)
     return recvfrom(atm->sockfd, data, max_data_len, 0, NULL, NULL);
 }
 
+// Secure send by encrypting and authenticating before sending
+static ssize_t atm_send_secure(ATM *atm, const char *plaintext, size_t plaintext_len)
+{
+    uint8_t ciphertext[MAX_CIPHERTEXT_SIZE];
+
+    int cipher_len = crypto_encrypt_and_auth(
+        (const uint8_t*)plaintext, plaintext_len,
+        ciphertext, sizeof(ciphertext),
+        atm->sequence_number++,
+        atm->secrets.encryption_key,
+        atm->secrets.hmac_key
+    );
+
+    if (cipher_len < 0) {
+        return -1;
+    }
+
+    return atm_send(atm, (char*)ciphertext, (size_t)cipher_len);
+}
+
+// Secure receive by decrypting and verifying
+static ssize_t atm_recv_secure(ATM *atm, char *plaintext, size_t max_plaintext_len)
+{
+    uint8_t ciphertext[MAX_CIPHERTEXT_SIZE];
+    uint64_t received_seq;
+
+    ssize_t cipher_len = atm_recv(atm, (char*)ciphertext, sizeof(ciphertext));
+    if (cipher_len < 0) {
+        return -1;
+    }
+
+    int plain_len = crypto_decrypt_and_verify(
+        ciphertext, (size_t)cipher_len,
+        (uint8_t*)plaintext, max_plaintext_len,
+        &received_seq,
+        atm->secrets.encryption_key,
+        atm->secrets.hmac_key
+    );
+
+    if (plain_len < 0) {
+        return -1;  // Decryption or authentication failed
+    }
+
+    plaintext[plain_len] = '\0';
+    return plain_len;
+}
+
 void atm_process_command(ATM *atm, char *command)
 {
-    // TODO: Implement the ATM's side of the ATM-bank protocol
-
-	/*
-	 * The following is a toy example that simply sends the
-	 * user's command to the bank, receives a message from the
-	 * bank, and then prints it to stdout.
-	 */
-
-	/*
-    char recvline[10000];
-    int n;
-
-    atm_send(atm, command, strlen(command));
-    n = atm_recv(atm,recvline,10000);
-    recvline[n]=0;
-    fputs(recvline,stdout);
-	*/
-    char cmd[64];
+    char cmd[100];
     char arg1[256];
     char arg2[256];
 
     size_t len = strlen(command);
-    if (len > 0 && command[len-1] == '\n') {
-        command[len-1] = '\0';
-    }
+    if (len > 0 && command[len-1] == '\n') command[len-1] = '\0';
 
-    int num_args = sscanf(command, "%63s %255s %255s", cmd, arg1, arg2);
-    if (num_args <= 0) {
-        return; // empty line
+    int num_args = sscanf(command, "%99s %255s %255s", cmd, arg1, arg2);
+
+    if (num_args < 1) {
+        printf("Invalid command\n");
+        return;
     }
 
     // begin-session <user-name>
     if (strcmp(cmd, "begin-session") == 0) {
-        if (atm->logged_in) {
+        if (atm->in_session) {
             printf("A user is already logged in\n");
             return;
         }
 
         if (num_args != 2 || !is_valid_user(arg1)) {
-            printf("Usage: begin-session <user-name>\n");
+            printf("Usage:  begin-session <user-name>\n");
             return;
         }
 
-        const char *user = arg1;
-
-        // Ask bank if user exists
-        if (!atm_check_user_exists(atm, user)) {
-            printf("No such user\n");
+        // Read card file
+        char filename[300];
+        snprintf(filename, sizeof(filename), "%s.card", arg1);
+        FILE *card_file = fopen(filename, "rb");
+        if (card_file == NULL) {
+            printf("Unable to access %s's card\n", arg1);
             return;
         }
 
-        // Check card file
-        char card_filename[300];
-        snprintf(card_filename, sizeof(card_filename), "%s.card", user);
-        FILE *card_fp = fopen(card_filename, "rb");
-        if (card_fp == NULL) {
-            printf("Unable to access %s's card\n", user);
+        // Read IV, length, and ciphertext
+        unsigned char iv[16];
+        int ciphertext_len;
+        unsigned char ciphertext[256];
+
+        if (fread(iv, 1, 16, card_file) != 16 ||
+            fread(&ciphertext_len, sizeof(int), 1, card_file) != 1 ||
+            ciphertext_len <= 0 ||
+            ciphertext_len > (int)sizeof(ciphertext) ||
+            fread(ciphertext, 1, (size_t)ciphertext_len, card_file) != (size_t)ciphertext_len) {
+            printf("Unable to access %s's card\n", arg1);
+            fclose(card_file);
             return;
         }
-        fclose(card_fp);
+        fclose(card_file);
+
+        // Decrypt username
+        EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+        if (!ctx) {
+            printf("Unable to access %s's card\n", arg1);
+            return;
+        }
+
+        unsigned char decrypted[256];
+        int len1, len2;
+
+        if (1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL,
+                                    atm->secrets.encryption_key, iv) ||
+            1 != EVP_DecryptUpdate(ctx, decrypted, &len1, ciphertext, ciphertext_len) ||
+            1 != EVP_DecryptFinal_ex(ctx, decrypted + len1, &len2)) {
+            printf("Unable to access %s's card\n", arg1);
+            EVP_CIPHER_CTX_free(ctx);
+            return;
+        }
+
+        EVP_CIPHER_CTX_free(ctx);
+        decrypted[len1 + len2] = '\0';
+
+        // Verify username matches
+        if (strcmp((char*)decrypted, arg1) != 0) {
+            printf("Unable to access %s's card\n", arg1);
+            return;
+        }
 
         // Prompt for PIN
-        char pin_buf[100];
         printf("PIN? ");
         fflush(stdout);
 
-        if (fgets(pin_buf, sizeof(pin_buf), stdin) == NULL) {
+        char pin[10];
+        if (fgets(pin, sizeof(pin), stdin) == NULL) {
             printf("Not authorized\n");
             return;
         }
 
-        size_t pin_len = strlen(pin_buf);
-        if (pin_len > 0 && pin_buf[pin_len-1] == '\n') {
-            pin_buf[pin_len-1] = '\0';
-            pin_len--;
+        // Remove newline
+        size_t pin_len = strlen(pin);
+        if (pin_len > 0 && pin[pin_len-1] == '\n') {
+            pin[pin_len-1] = '\0';
         }
 
-        if (pin_len != 4) {
-            printf("Not authorized\n");
-            return;
-        }
-        for (int i = 0; i < 4; i++) {
-            if (!isdigit((unsigned char)pin_buf[i])) {
-                printf("Not authorized\n");
-                return;
-            }
-        }
-
-        // Authenticate with bank
-        if (!atm_auth_user(atm, user, pin_buf)) {
+        // Validate PIN format
+        if (!is_valid_pin(pin)) {
             printf("Not authorized\n");
             return;
         }
 
-        atm->logged_in = 1;
-        strncpy(atm->current_user, user, 250);
-        atm->current_user[250] = '\0';
-        printf("Authorized\n");
+        // Send authentication request to bank
+        char request[500];
+        snprintf(request, sizeof(request), "AUTH %s %s", arg1, pin);
 
-    // withdraw <amt>
-    } else if (strcmp(cmd, "withdraw") == 0) {
-        if (!atm->logged_in) {
+        if (atm_send_secure(atm, request, strlen(request)) < 0) {
+            printf("Not authorized\n");
+            return;
+        }
+
+        // Receive response
+        char response[1000];
+        int n = (int)atm_recv_secure(atm, response, sizeof(response) - 1);
+        if (n <= 0) {
+            printf("Not authorized\n");
+            return;
+        }
+
+        if (strcmp(response, "AUTH_OK") == 0) {
+            atm->in_session = 1;
+            strncpy(atm->current_user, arg1, 250);
+            atm->current_user[250] = '\0';
+            strncpy(atm->current_pin, pin, 4);
+            atm->current_pin[4] = '\0';
+            printf("Authorized\n");
+        } else {
+            printf("Not authorized\n");
+        }
+    }
+    // withdraw <amount>
+    else if (strcmp(cmd, "withdraw") == 0) {
+        if (!atm->in_session) {
             printf("No user logged in\n");
             return;
         }
 
         if (num_args != 2 || !is_valid_amount(arg1)) {
-            printf("Usage: withdraw <amt>\n");
+            printf("Usage:  withdraw <amt>\n");
             return;
         }
 
-        int res = atm_withdraw_remote(atm, atm->current_user, arg1);
-        if (res == 0) {
-            printf("Insufficient funds\n");
-        } else if (res == 1) {
-            printf("$%s dispensed\n", arg1);
-        } else {
-            printf("Insufficient funds\n"); // conservative failure behavior
+        long amount_long = strtol(arg1, NULL, 10);
+        if (amount_long <= 0 || amount_long > INT_MAX) {
+            printf("Usage:  withdraw <amt>\n");
+            return;
         }
 
+        // Send withdraw request to bank
+        char request[500];
+        snprintf(request, sizeof(request), "WITHDRAW %s %ld",
+                 atm->current_user, amount_long);
+
+        if (atm_send_secure(atm, request, strlen(request)) < 0) {
+            printf("Insufficient funds\n");
+            return;
+        }
+
+        // Receive response
+        char response[1000];
+        int n = (int)atm_recv_secure(atm, response, sizeof(response) - 1);
+        if (n <= 0) {
+            printf("Insufficient funds\n");
+            return;
+        }
+
+        if (strncmp(response, "WITHDRAW_OK", 11) == 0) {
+            printf("$%s dispensed\n", arg1);
+        } else {
+            printf("Insufficient funds\n");
+        }
+    }
     // balance
-    } else if (strcmp(cmd, "balance") == 0) {
-        if (!atm->logged_in) {
+    else if (strcmp(cmd, "balance") == 0) {
+        if (!atm->in_session) {
             printf("No user logged in\n");
             return;
         }
 
         if (num_args != 1) {
-            printf("Usage: balance\n");
+            printf("Usage:  balance\n");
             return;
         }
 
-        int bal;
-        if (atm_balance_remote(atm, atm->current_user, &bal)) {
-            printf("$%d\n", bal);
-        } else {
-            printf("$0\n");  // protocol error fallback
+        // Send balance request to bank
+        char request[500];
+        snprintf(request, sizeof(request), "BALANCE %s", atm->current_user);
+
+        if (atm_send_secure(atm, request, strlen(request)) < 0) {
+            printf("Unable to access account\n");
+            return;
         }
 
+        // Receive response
+        char response[1000];
+        int n = (int)atm_recv_secure(atm, response, sizeof(response) - 1);
+        if (n <= 0) {
+            printf("Unable to access account\n");
+            return;
+        }
+
+        int balance;
+        if (sscanf(response, "BALANCE %d", &balance) == 1) {
+            printf("$%d\n", balance);
+        } else {
+            printf("Unable to access account\n");
+        }
+    }
     // end-session
-    } else if (strcmp(cmd, "end-session") == 0) {
-        if (!atm->logged_in) {
+    else if (strcmp(cmd, "end-session") == 0) {
+        if (!atm->in_session) {
             printf("No user logged in\n");
             return;
         }
-        atm->logged_in = 0;
-        atm->current_user[0] = '\0';
-        printf("User logged out\n");
 
-    // anything else
-    } else {
+        if (num_args != 1) {
+            printf("Usage:  end-session\n");
+            return;
+        }
+
+        atm->in_session = 0;
+        atm->current_user[0] = '\0';
+        atm->current_pin[0] = '\0';
+        printf("User logged out\n");
+    }
+    else {
         printf("Invalid command\n");
     }
 }

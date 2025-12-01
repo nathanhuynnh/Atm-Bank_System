@@ -7,47 +7,37 @@
 #include "atm.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 int main(int argc, char **argv)
 {
-    char user_input[1000];
-
-    if (argc != 2) {
+    if (argc != 2)
+    {
         printf("Usage:  atm <init-file>\n");
         return 64;
     }
 
+    char user_input[1000];
+
     ATM *atm = atm_create(argv[1]);
 
-    atm_print_prompt(atm);
-
-    while (fgets(user_input, sizeof(user_input), stdin) != NULL)
+    while (1)
     {
+        // Display appropriate prompt based on session state
+        if (atm->in_session) {
+            printf("ATM (%s):  ", atm->current_user);
+        } else {
+            printf("ATM: ");
+        }
+        fflush(stdout);
+
+        if (fgets(user_input, sizeof(user_input), stdin) == NULL) {
+            break;
+        }
+
         atm_process_command(atm, user_input);
-        atm_print_prompt(atm);
     }
 
     atm_free(atm);
     return EXIT_SUCCESS;
 }
-
-
-// static const char prompt[] = "ATM: ";
-
-// int main()
-// {
-//     char user_input[1000];
-
-//     ATM *atm = atm_create();
-
-//     printf("%s", prompt);
-//     fflush(stdout);
-
-//     while (fgets(user_input, 10000,stdin) != NULL)
-//     {
-//         atm_process_command(atm, user_input);
-//         printf("%s", prompt);
-//         fflush(stdout);
-//     }
-// 	return EXIT_SUCCESS;
-// }
