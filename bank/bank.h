@@ -40,6 +40,7 @@ typedef struct _Bank
     // TODO add more, as needed
     init_data_t secrets; // Stores keys from .bank file
     User *users;
+    uint64_t last_sequence;  // Track last seen sequence number for replay protection
 } Bank;
 
 Bank* bank_create(char *fname);
