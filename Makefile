@@ -13,11 +13,11 @@ all: bin bin/atm bin/bank bin/router bin/init
 bin:
 	mkdir -p bin
 
-bin/atm : bin atm/atm-main.c atm/atm.c
-	${CC} ${CFLAGS} atm/atm.c atm/atm-main.c -o bin/atm
+bin/atm : bin atm/atm-main.c atm/atm.c util/crypto.c
+	${CC} ${CFLAGS} atm/atm.c atm/atm-main.c util/crypto.c -o bin/atm -lcrypto
 
-bin/bank : bin bank/bank-main.c bank/bank.c
-	${CC} ${CFLAGS} bank/bank.c bank/bank-main.c -o bin/bank
+bin/bank : bin bank/bank-main.c bank/bank.c util/crypto.c
+	${CC} ${CFLAGS} bank/bank.c bank/bank-main.c util/crypto.c -o bin/bank -lcrypto
 
 bin/router : bin router/router-main.c router/router.c
 	${CC} ${CFLAGS} router/router.c router/router-main.c -o bin/router
