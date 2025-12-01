@@ -69,14 +69,14 @@ Bank* bank_create(char *init_fname)
     //Load Init file
     FILE *fp = fopen(init_fname, "rb");
     if (fp == NULL) {
-        printf("Error opening bank file\n");
+        printf("Error opening bank initialization file\n");
         exit(64);
     }
 
     //Read keys into bank struct
     size_t read_count = fread(&bank->secrets, sizeof(init_data_t), 1, fp);
     if (read_count != 1) {
-        printf("Error opening bank file \n");
+        printf("Error opening bank initialization file\n");
         fclose(fp);
         exit(64);
     }
@@ -277,7 +277,7 @@ void bank_process_local_command(Bank *bank, char *command, size_t len)
         //Deposit <name> <amount>
     } else if (strcmp(cmd, "deposit") == 0 ) {
         if (num_args != 3 || !is_valid_user(arg1) || !is_valid_amount(arg2)) {
-            printf("Usage:  deposit <user-name> <amount>\n");
+            printf("Usage:  deposit <user-name> <amt>\n");
             return;
         }
 
