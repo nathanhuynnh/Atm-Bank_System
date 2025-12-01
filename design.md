@@ -16,31 +16,61 @@ The `init` program creates two identical files containing shared cryptographic s
 
 These keys are generated using OpenSSL's cryptographically secure random number generator and must be present before the Bank and ATM can communicate.
 
+### Implementation Notes
+
+- Sequence numbers start from the initial nonce value in the init files
+- Each side maintains its own sequence counter
+- Sequence numbers are checked to prevent replay attacks
+- Failed HMAC verification results in message rejection
+- All cryptographic operations use OpenSSL
+
 ### Bank Program
-The Bank maintains user accounts in memory and processes authentication, balance queries, and withdrawal requests from the ATM. It supports local administrative commands including user creation, deposits, and balance queries. When creating a user, the Bank generates an encrypted card file containing the username, which the ATM must present during authentication.
+The Bank maintains user accounts in memory using a linked list structure and processes authentication, balance queries, and withdrawal requests from the ATM. It supports three local administrative commands:
+- `create-user <name> <pin> <balance>`: Creates a new user and generates an encrypted `.card` file
+- `deposit <name> <amount>`: Adds funds to an existing user's account
+- `balance <name>`: Displays a user's current balance
+
+When creating a user, the Bank generates an encrypted card file containing the username encrypted with AES-256-CBC, which the ATM must present during authentication. The Bank performs input validation on all commands and includes overflow protection for account balances.
 
 ### ATM Program
-The ATM reads encrypted card files and prompts users for PINs before establishing sessions with the Bank. It supports three main operations: begin-session (authentication), withdraw, and balance queries. The ATM validates user input locally and encrypts all communications with the Bank.
+The ATM reads encrypted card files and prompts users for PINs before establishing sessions with the Bank. It supports four main operations:
+- `begin-session <username>`: Reads card file, prompts for PIN, authenticates with Bank
+- `withdraw <amount>`: Requests withdrawal from current user's account
+- `balance`: Queries current user's account balance
+- `end-session`: Logs out current user and clears session state
+
+The ATM validates user input locally (usernames must be alphabetic, PINs must be 4 digits, amounts must be numeric) and encrypts all communications with the Bank. It maintains session state to ensure users must authenticate before performing transactions. Card file decryption uses the same AES-256-CBC encryption key shared with the Bank.
 
 ## File Formats
 
 ### Initialization Files (.bank and .atm)
-Both files contain identical binary data structured as:
+Both files contain identical binary data (72 bytes total) structured as:
 ```c
 typedef struct {
-    uint8_t encryption_key[32];    // AES-256 key
-    uint8_t hmac_key[32];          // HMAC-SHA256 key
-    uint8_t initial_nonce[8];      // Starting sequence number
+    uint8_t encryption_key[32];    // AES-256 key (32 bytes)
+    uint8_t hmac_key[32];          // HMAC-SHA256 key (32 bytes)
+    uint8_t initial_nonce[8];      // Starting sequence number (8 bytes)
 } init_data_t;
 ```
 
-### Card Files (.card)
-Card files are created by the Bank during user creation and contain:
-- **IV** (16 bytes): Random initialization vector for AES-256-CBC
-- **Ciphertext Length** (4 bytes): Length of encrypted data
-- **Encrypted Username**: Username encrypted with Bank's encryption key
+The binary layout is:
+```
+[Encryption Key (32 bytes)][HMAC Key (32 bytes)][Initial Nonce (8 bytes)]
+```
 
-The card file format prevents unauthorized card creation since only the Bank possesses the encryption key needed to create valid cards.
+These keys are generated using `RAND_bytes()` from OpenSSL's cryptographically secure random number generator. Both the ATM and Bank must load the same initialization data to establish their shared cryptographic keys.
+
+### Card Files (.card)
+Card files are created by the Bank during user creation and contain the following binary structure:
+```
+[IV (16 bytes)][Ciphertext Length (4 bytes)][Encrypted Username (variable)]
+```
+
+- **IV** (16 bytes): Random initialization vector generated with `RAND_bytes()` for AES-256-CBC
+- **Ciphertext Length** (4 bytes): Integer length of the encrypted username data (stored as `sizeof(int)`)
+- **Encrypted Username** (variable): Username encrypted using AES-256-CBC with the Bank's encryption key
+
+The card file format prevents unauthorized card creation since only the Bank possesses the encryption key needed to create valid cards. The ATM verifies authenticity by decrypting the username and comparing it to the requested username during `begin-session`.
 
 ## Message Protocol
 
@@ -50,25 +80,28 @@ All messages between ATM and Bank use the following structure:
 [IV (16 bytes)][Sequence Number (8 bytes)][Encrypted Data (variable)][HMAC (32 bytes)]
 ```
 
-- **IV**: Fresh random initialization vector for each message
-- **Sequence Number**: 64-bit counter in network byte order
+- **IV**: Fresh random initialization vector for each message using `RAND_bytes()`
+- **Sequence Number**: 64-bit counter in network byte order (using host_to_network_64)
 - **Encrypted Data**: AES-256-CBC encrypted plaintext message
-- **HMAC**: SHA256 hash over IV, sequence number, and encrypted data
+- **HMAC**: SHA256 hash computed over IV, sequence number, and encrypted data
+- **Total overhead**: 56 bytes (16 + 8 + 32) plus padding for AES block alignment
 
 ### Message Types
-The protocol supports three primary message exchanges:
+The protocol supports three primary message exchanges using simple text-based commands:
 
 **Authentication (AUTH)**
 - ATM sends: `AUTH <username> <pin>`
-- Bank responds: `AUTH_OK` or `AUTH_FAIL`
+- Bank responds: `AUTH_OK` (successful) or `AUTH_FAIL` (failed)
 
 **Balance Query (BALANCE)**
 - ATM sends: `BALANCE <username>`
-- Bank responds: `BALANCE <amount>` or `BALANCE_FAIL`
+- Bank responds: `BALANCE <amount>` (successful) or `BALANCE_FAIL` (user not found)
 
 **Withdrawal (WITHDRAW)**
 - ATM sends: `WITHDRAW <username> <amount>`
-- Bank responds: `WITHDRAW_OK` or `WITHDRAW_FAIL`
+- Bank responds: `WITHDRAW_OK` (successful) or `WITHDRAW_FAIL` (insufficient funds or user not found)
+
+All messages are encrypted inside the secure wire format described above. The Bank increments the sequence number for each response (received_seq + 1) to maintain proper ordering.
 
 ## Security Analysis
 
