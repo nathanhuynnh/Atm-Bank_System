@@ -19,13 +19,11 @@ int main(int argc, char**argv)
    char sendline[1000];
    char recvline[1000];
 
-    //Implementation:
     if (argc != 2){
         printf("Usage:  bank <init-file>\n");
         return 64;
     }
 
-    //Fixed filename
    Bank *bank = bank_create(argv[1]);
 
    printf("%s", prompt);

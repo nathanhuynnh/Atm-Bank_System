@@ -42,7 +42,6 @@ ATM* atm_create(const char *init_filename)
         exit(1);
     }
 
-    // Load init file (keys, etc.)
     FILE *fp = fopen(init_filename, "rb");
     if (fp == NULL) {
         printf("Error opening ATM initialization file\n");
@@ -83,9 +82,6 @@ ATM* atm_create(const char *init_filename)
     atm->in_session = 0;
     atm->current_user[0] = '\0';
     atm->current_pin[0] = '\0';
-
-    // Start sequence at 1 so bank (which initializes last_sequence to 0)
-    // will accept the first message.
     atm->sequence_number = 1;
 
     return atm;
@@ -115,7 +111,7 @@ ssize_t atm_recv(ATM *atm, char *data, size_t max_data_len)
     return recvfrom(atm->sockfd, data, max_data_len, 0, NULL, NULL);
 }
 
-// Secure send by encrypting and authenticating before sending
+// Secure send by encrypting and authenticating
 static ssize_t atm_send_secure(ATM *atm, const char *plaintext, size_t plaintext_len)
 {
     uint8_t ciphertext[MAX_CIPHERTEXT_SIZE];
@@ -155,7 +151,7 @@ static ssize_t atm_recv_secure(ATM *atm, char *plaintext, size_t max_plaintext_l
     );
 
     if (plain_len < 0) {
-        return -1;  // Decryption or authentication failed
+        return -1;
     }
 
     plaintext[plain_len] = '\0';
@@ -178,7 +174,7 @@ void atm_process_command(ATM *atm, char *command)
         return;
     }
 
-    // begin-session <user-name>
+    // begin-session (user-name)
     if (strcmp(cmd, "begin-session") == 0) {
         if (atm->in_session) {
             printf("A user is already logged in\n");
@@ -199,7 +195,6 @@ void atm_process_command(ATM *atm, char *command)
             return;
         }
 
-        // Read IV, length, and ciphertext
         unsigned char iv[16];
         int ciphertext_len;
         unsigned char ciphertext[256];
@@ -237,13 +232,12 @@ void atm_process_command(ATM *atm, char *command)
         EVP_CIPHER_CTX_free(ctx);
         decrypted[len1 + len2] = '\0';
 
-        // Verify username matches
+        // Verify username
         if (strcmp((char*)decrypted, arg1) != 0) {
             printf("Unable to access %s's card\n", arg1);
             return;
         }
 
-        // Prompt for PIN
         printf("PIN? ");
         fflush(stdout);
 
@@ -252,20 +246,19 @@ void atm_process_command(ATM *atm, char *command)
             printf("Not authorized\n");
             return;
         }
-
-        // Remove newline
+        
         size_t pin_len = strlen(pin);
         if (pin_len > 0 && pin[pin_len-1] == '\n') {
             pin[pin_len-1] = '\0';
         }
 
-        // Validate PIN format
+        // Validate PIN
         if (!is_valid_pin(pin)) {
             printf("Not authorized\n");
             return;
         }
 
-        // Send authentication request to bank
+        // Send auth request to bank
         char request[500];
         snprintf(request, sizeof(request), "AUTH %s %s", arg1, pin);
 
@@ -274,7 +267,6 @@ void atm_process_command(ATM *atm, char *command)
             return;
         }
 
-        // Receive response
         char response[1000];
         int n = (int)atm_recv_secure(atm, response, sizeof(response) - 1);
         if (n <= 0) {
@@ -293,7 +285,7 @@ void atm_process_command(ATM *atm, char *command)
             printf("Not authorized\n");
         }
     }
-    // withdraw <amount>
+    // withdraw (amount)
     else if (strcmp(cmd, "withdraw") == 0) {
         if (!atm->in_session) {
             printf("No user logged in\n");
@@ -321,7 +313,6 @@ void atm_process_command(ATM *atm, char *command)
             return;
         }
 
-        // Receive response
         char response[1000];
         int n = (int)atm_recv_secure(atm, response, sizeof(response) - 1);
         if (n <= 0) {
@@ -356,7 +347,6 @@ void atm_process_command(ATM *atm, char *command)
             return;
         }
 
-        // Receive response
         char response[1000];
         int n = (int)atm_recv_secure(atm, response, sizeof(response) - 1);
         if (n <= 0) {

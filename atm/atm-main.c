@@ -23,7 +23,6 @@ int main(int argc, char **argv)
 
     while (1)
     {
-        // Display appropriate prompt based on session state
         if (atm->in_session) {
             printf("ATM (%s):  ", atm->current_user);
         } else {

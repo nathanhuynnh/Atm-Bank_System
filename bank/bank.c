@@ -11,7 +11,7 @@
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 
-//Helper functions
+// Helper functions
 int is_valid_user(const char *name) {
     if (name == NULL || strlen(name) == 0 || strlen(name) > 250) return 0;
     for (int i = 0; name[i]; i++) {
@@ -66,14 +66,12 @@ Bank* bank_create(char *init_fname)
 
     bank->users = NULL;
     
-    //Load Init file
     FILE *fp = fopen(init_fname, "rb");
     if (fp == NULL) {
         printf("Error opening bank initialization file\n");
         exit(64);
     }
 
-    //Read keys into bank struct
     size_t read_count = fread(&bank->secrets, sizeof(init_data_t), 1, fp);
     if (read_count != 1) {
         printf("Error opening bank initialization file\n");
@@ -96,6 +94,7 @@ Bank* bank_create(char *init_fname)
     bind(bank->sockfd,(struct sockaddr *)&bank->bank_addr,sizeof(bank->bank_addr));
 
     // Set up the protocol state
+    // TODO add more, as needed
     bank->last_sequence = 0;
 
     return bank;
@@ -168,7 +167,7 @@ static ssize_t bank_recv_secure(Bank *bank, char *plaintext, size_t max_plaintex
     );
     
     if (plain_len < 0) {
-        return -1;  // Decryption or authentication failed
+        return -1;
     }
     
     plaintext[plain_len] = '\0';
@@ -178,16 +177,16 @@ static ssize_t bank_recv_secure(Bank *bank, char *plaintext, size_t max_plaintex
 void bank_process_local_command(Bank *bank, char *command, size_t len)
 {
     // TODO: Implement the bank's local commands
-    char cmd[100]; // Action (deposit)
-    char arg1[256]; // Argument 1 (username)
-    char arg2[256]; // Argument 2 (pin or amount)
-    char arg3[256]; // Argument 3 (balance)
+    char cmd[100];
+    char arg1[256];
+    char arg2[256];
+    char arg3[256];
 
 
     if  (len > 0 && command[len-1] == '\n') command[len-1] = '\0';
     int num_args = sscanf(command, "%s %s %s %s", cmd, arg1, arg2, arg3);
 
-    //Create user <name> <pin> <balance>
+    // Create user (name, pin, and balance)
     if (strcmp(cmd, "create-user") == 0) {
         if (num_args != 4 || !is_valid_user(arg1) || !is_valid_pin(arg2) || !is_valid_amount(arg3)) {
             printf("Usage:  create-user <user-name> <pin> <balance>\n");
@@ -207,7 +206,7 @@ void bank_process_local_command(Bank *bank, char *command, size_t len)
             return;
         }
 
-        //Create encrypted card file
+        // Create encrypted card file
         char filename[300];
         snprintf(filename, sizeof(filename), "%s.card", arg1);
         FILE *card_file = fopen(filename, "wb");
@@ -216,20 +215,20 @@ void bank_process_local_command(Bank *bank, char *command, size_t len)
             return;
         }
 
-        //Write encrypted token
+        // Write the encrypted token
         unsigned char iv[16];
-        unsigned char ciphertext[256]; //Buffer for encrypted data
+        unsigned char ciphertext[256];
         int len_p1, len_p2;
         int plaintext_len = strlen(arg1) + 1;
 
-        //Create random initialization vector (IV)
+        // Create random IV
         if (!RAND_bytes(iv, sizeof(iv))) {
             printf("Error creating random initialization vector\n");
             fclose(card_file);
             return;
         }
 
-        //Initialize OpenSSL Cipher
+        // Initialize OpenSSL Cipher
         EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
         if (!ctx) {
             printf("Error creating cipher context\n");
@@ -237,7 +236,7 @@ void bank_process_local_command(Bank *bank, char *command, size_t len)
             return;
         }
 
-        //Setup AES-256-CBC encryption using the bank's secret key
+        // Setup AES-256-CBC encryption with the bank's secret key
         if (1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, bank->secrets.encryption_key, iv)) {
             printf("Error initializing encryption\n");
             EVP_CIPHER_CTX_free(ctx);
@@ -245,7 +244,7 @@ void bank_process_local_command(Bank *bank, char *command, size_t len)
             return;
         }
 
-        //Encrypt the username (arg1)
+        // Encrypt the username
         if (1 != EVP_EncryptUpdate(ctx, ciphertext, &len_p1, (unsigned char*)arg1, plaintext_len)) {
             printf("Error encrypting username\n");
             EVP_CIPHER_CTX_free(ctx);
@@ -253,7 +252,7 @@ void bank_process_local_command(Bank *bank, char *command, size_t len)
             return;
         }
 
-        //Handling padding
+        // Handle padding
         if (1 != EVP_EncryptFinal_ex(ctx, ciphertext + len_p1, &len_p2)) {
             printf("Error finalizing encryption\n");
             EVP_CIPHER_CTX_free(ctx);
@@ -274,7 +273,7 @@ void bank_process_local_command(Bank *bank, char *command, size_t len)
         printf("Created user %s\n", arg1);
 
 
-        //Deposit <name> <amount>
+        // Deposit (name, amount)
     } else if (strcmp(cmd, "deposit") == 0 ) {
         if (num_args != 3 || !is_valid_user(arg1) || !is_valid_amount(arg2)) {
             printf("Usage:  deposit <user-name> <amt>\n");
@@ -290,7 +289,7 @@ void bank_process_local_command(Bank *bank, char *command, size_t len)
 
         long amt = strtol(arg2, NULL, 10);
 
-        //Overflow check: max - balance < amount
+        // Overflow (max - balance < amount)
         if ((long)INT_MAX - u->balance < amt) {
             printf("Too rich for this program\n");
             return;
@@ -300,7 +299,7 @@ void bank_process_local_command(Bank *bank, char *command, size_t len)
         printf("$%ld added to %s's account\n", amt, arg1);
 
 
-        //Balance <name>
+        // Balance (name)
     } else if (strcmp(cmd, "balance") == 0) {
         if (num_args != 2 || !is_valid_user(arg1)) {
             printf("Usage:  balance <user-name>\n");
@@ -326,7 +325,7 @@ void bank_process_remote_command(Bank *bank, char *command, size_t len)
     char plaintext[1000];
     uint64_t received_seq;
     
-    // Decrypt and verify the incoming message
+    // Decrypt and verify the message
     int plain_len = crypto_decrypt_and_verify(
         (const uint8_t*)command, len,
         (uint8_t*)plaintext, sizeof(plaintext) - 1,
@@ -336,12 +335,11 @@ void bank_process_remote_command(Bank *bank, char *command, size_t len)
     );
     
     if (plain_len < 0) {
-        return;  // Invalid message, ignore
+        return;
     }
     
     plaintext[plain_len] = '\0';
     
-    // Check for replay attack, if detected ignore it
     if (received_seq <= bank->last_sequence) {
         return;
     }
@@ -357,7 +355,7 @@ void bank_process_remote_command(Bank *bank, char *command, size_t len)
         return;
     }
     
-    // AUTH <username> <pin>
+    // auth (user, pin)
     if (strcmp(cmd, "AUTH") == 0 && num_args == 3) {
         User *u = find_user(bank, arg1);
         if (u != NULL && strcmp(u->pin, arg2) == 0) {
@@ -366,7 +364,7 @@ void bank_process_remote_command(Bank *bank, char *command, size_t len)
             bank_send_secure(bank, "AUTH_FAIL", 9, received_seq + 1);
         }
     }
-    // WITHDRAW <username> <amount>
+    // withdraw (user, amount)
     else if (strcmp(cmd, "WITHDRAW") == 0 && num_args == 3) {
         User *u = find_user(bank, arg1);
         if (u == NULL) {
@@ -383,7 +381,7 @@ void bank_process_remote_command(Bank *bank, char *command, size_t len)
         u->balance -= amount;
         bank_send_secure(bank, "WITHDRAW_OK", 11, received_seq + 1);
     }
-    // BALANCE <username>
+    // balance (user)
     else if (strcmp(cmd, "BALANCE") == 0 && num_args == 2) {
         User *u = find_user(bank, arg1);
         if (u == NULL) {
