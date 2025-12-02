@@ -184,7 +184,7 @@ void bank_process_local_command(Bank *bank, char *command, size_t len)
 
 
     if  (len > 0 && command[len-1] == '\n') command[len-1] = '\0';
-    int num_args = sscanf(command, "%s %s %s %s", cmd, arg1, arg2, arg3);
+    int num_args = sscanf(command, "%99s %255s %255s %255s", cmd, arg1, arg2, arg3);
 
     // Create user (name, pin, and balance)
     if (strcmp(cmd, "create-user") == 0) {

@@ -191,7 +191,7 @@ void atm_process_command(ATM *atm, char *command)
         snprintf(filename, sizeof(filename), "%s.card", arg1);
         FILE *card_file = fopen(filename, "rb");
         if (card_file == NULL) {
-            printf("Unable to access %s's card\n", arg1);
+            printf("No such user\n");
             return;
         }
 

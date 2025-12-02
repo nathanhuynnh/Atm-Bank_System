@@ -39,7 +39,9 @@ int main(int argc, char**argv)
 
        if(FD_ISSET(0, &fds))
        {
-           fgets(sendline, 10000,stdin);
+           if (fgets(sendline, 10000,stdin) == NULL) {
+               break;
+           }
            bank_process_local_command(bank, sendline, strlen(sendline));
            printf("%s", prompt);
            fflush(stdout);
