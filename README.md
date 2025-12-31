@@ -1,6 +1,7 @@
 # ATM Design and Implementation
 
 Secure ATM-Bank System (Design & Implementation)
+
 A secure, distributed banking system implemented in C that simulates an ATM, a Bank server, and a Network Router. This project focuses on designing a custom application-layer protocol to ensure the confidentiality, integrity, and authenticity of financial transactions over an insecure network.
 
 ## Purpose
